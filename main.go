@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -11,6 +13,23 @@ import (
 
 	"boot.dev/linko/internal/store"
 )
+
+func initializeLogger() (*log.Logger, func(), error) {
+	logFile := os.Getenv("LINKO_LOG_FILE")
+	if logFile == "" {
+		return log.New(os.Stderr, "", log.LstdFlags), func() {}, nil
+	}
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, nil, err
+	}
+	bw := bufio.NewWriterSize(f, 8192)
+	logger := log.New(io.MultiWriter(os.Stderr, bw), "", log.LstdFlags)
+	return logger, func() {
+		bw.Flush()
+		f.Close()
+	}, nil
+}
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -25,22 +44,19 @@ func main() {
 }
 
 func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir string) int {
-	accessFile, err := os.OpenFile("linko.access.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logger, cleanup, err := initializeLogger()
 	if err != nil {
-		log.Printf("failed to open access log: %v\n", err)
+		log.Printf("failed to initialize logger: %v\n", err)
 		return 1
 	}
-	defer accessFile.Close()
+	defer cleanup()
 
-	accessLogger := log.New(accessFile, "INFO: ", log.LstdFlags)
-	stdLogger := log.New(os.Stderr, "DEBUG: ", log.LstdFlags)
-
-	st, err := store.New(dataDir, stdLogger)
+	st, err := store.New(dataDir, logger)
 	if err != nil {
-		stdLogger.Printf("failed to create store: %v\n", err)
+		logger.Printf("failed to create store: %v\n", err)
 		return 1
 	}
-	s := newServer(*st, httpPort, cancel, accessLogger)
+	s := newServer(*st, httpPort, cancel, logger)
 	var serverErr error
 	go func() {
 		serverErr = s.start()
@@ -51,11 +67,11 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 	defer shutdownCancel()
 
 	if err := s.shutdown(shutdownCtx); err != nil {
-		stdLogger.Printf("failed to shutdown server: %v\n", err)
+		logger.Printf("failed to shutdown server: %v\n", err)
 		return 1
 	}
 	if serverErr != nil {
-		stdLogger.Printf("server error: %v\n", serverErr)
+		logger.Printf("server error: %v\n", serverErr)
 		return 1
 	}
 	return 0
