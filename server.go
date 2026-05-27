@@ -55,7 +55,7 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 }
 
 func (s *server) start() error {
-	s.logger.Info(fmt.Sprintf("Linko is running on http://localhost%s", s.httpServer.Addr))
+	s.logger.Debug(fmt.Sprintf("Linko is running on http://localhost%s", s.httpServer.Addr))
 	ln, err := net.Listen("tcp", s.httpServer.Addr)
 	if err != nil {
 		return err
@@ -67,7 +67,7 @@ func (s *server) start() error {
 }
 
 func (s *server) shutdown(ctx context.Context) error {
-	s.logger.Info("Linko is shutting down")
+	s.logger.Debug("Linko is shutting down")
 	return s.httpServer.Shutdown(ctx)
 }
 
