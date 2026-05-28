@@ -14,7 +14,7 @@ const UserContextKey contextKey = "user"
 var allowedUsers = map[string]string{
 	"frodo":   "$2a$10$B6O/n6teuCzpuh66jrUAdeaJ3WvXcxRkzpN0x7H.di9G9e/NGb9Me",
 	"samwise": "$2a$10$EWZpvYhUJtJcEMmm/IBOsOGIcpxUnGIVMRiDlN/nxl1RRwWGkJtty",
-	// frodo: "ofTheNineFingers"
+	//"frodo":   "ofTheNineFingers",
 	// samwise: "theStrong"
 	"saruman": "invalidFormat",
 }
@@ -52,7 +52,6 @@ func (s *server) validatePassword(password, stored string) (bool, error) {
 		return false, nil
 	}
 	if err != nil {
-		s.logger.Error("error validating password", "error", err)
 		return false, err
 	}
 	return true, nil
