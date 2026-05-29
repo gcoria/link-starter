@@ -16,14 +16,26 @@ import (
 
 type closeFunc func() error
 
+func replaceAttr(groups []string, a slog.Attr) slog.Attr {
+	if a.Key == "error" {
+		err, ok := a.Value.Any().(error)
+		if !ok {
+			return a
+		}
+		return slog.String("error", fmt.Sprintf("%+v", err))
+	}
+	return a
+}
+
 func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) {
 	// STDERR handler - DEBUG and above
 	stderrHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level:       slog.LevelDebug,
+		ReplaceAttr: replaceAttr,
 	})
 
 	if logFile != "" {
-		file, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+		file, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open log file: %w", err)
 		}
@@ -31,7 +43,8 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) {
 
 		// File handler - INFO and above (JSON format)
 		fileHandler := slog.NewJSONHandler(bufferedFile, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
+			Level:       slog.LevelInfo,
+			ReplaceAttr: replaceAttr,
 		})
 
 		// Combine both handlers
