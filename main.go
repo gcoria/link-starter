@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"boot.dev/linko/internal/linkoerr"
 	"boot.dev/linko/internal/store"
 	pkgerr "github.com/pkg/errors"
 )
@@ -23,19 +24,55 @@ type stackTracer interface {
 	StackTrace() pkgerr.StackTrace
 }
 
+type multiError interface {
+	error
+	Unwrap() []error
+}
+
+// errorAttrs builds a slice of slog.Attr for a single error containing:
+// - message attribute with the error's message
+// - any linkoerr attributes extracted from the error
+// - stack_trace attribute (only if the error is a stackTracer)
+func errorAttrs(err error) []slog.Attr {
+	attrs := []slog.Attr{slog.String("message", err.Error())}
+
+	// Extract and add structured attributes from error chain
+	errAttrs := linkoerr.Attrs(err)
+	if len(errAttrs) > 0 {
+		attrs = append(attrs, errAttrs...)
+	}
+
+	// Add stack trace if present
+	var stackErr stackTracer
+	if errors.As(err, &stackErr) {
+		attrs = append(attrs, slog.String("stack_trace", fmt.Sprintf("%+v", stackErr.StackTrace())))
+	}
+
+	return attrs
+}
+
 func replaceAttr(groups []string, a slog.Attr) slog.Attr {
 	if a.Key == "error" {
 		err, ok := a.Value.Any().(error)
 		if !ok {
 			return a
 		}
-		var stackErr stackTracer
-		if errors.As(err, &stackErr) {
-			return slog.Group(a.Key,
-				slog.String("message", stackErr.Error()),
-				slog.String("stack_trace", fmt.Sprintf("%+v", stackErr.StackTrace())),
-			)
+
+		// Check for multi-error and handle it specially
+		var multiErr multiError
+		if errors.As(err, &multiErr) {
+			// Build grouped errors for multi-error
+			wrappedErrs := multiErr.Unwrap()
+			errorGroups := make([]slog.Attr, 0, len(wrappedErrs))
+			for i, wrappedErr := range wrappedErrs {
+				key := fmt.Sprintf("error_%d", i+1)
+				errorGroups = append(errorGroups, slog.GroupAttrs(key, errorAttrs(wrappedErr)...))
+			}
+			return slog.GroupAttrs("errors", errorGroups...)
 		}
+
+		// Single error case - use existing "error" key
+		return slog.GroupAttrs(a.Key, errorAttrs(err)...)
 	}
 	return a
 }
