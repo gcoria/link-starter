@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"boot.dev/linko/internal/store"
 )
@@ -48,14 +50,79 @@ func newServer(store store.Store, port int, cancel context.CancelFunc, logger *s
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, r)
+			start := time.Now()
+
+			// Wrap request body to count bytes read
+			var spyBody *spyReadCloser
+			if r.Body != nil {
+				spyBody = newSpyReadCloser(r.Body)
+				r.Body = spyBody
+			}
+
+			// Wrap response writer to capture status and bytes written
+			spyW := newSpyResponseWriter(w)
+
+			next.ServeHTTP(spyW, r)
+
+			// Get request body bytes read
+			var requestBodyBytes int64
+			if spyBody != nil {
+				requestBodyBytes = spyBody.read
+			}
+
 			logger.Info("Served request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"client_ip", r.RemoteAddr,
+				"duration", time.Since(start).String(),
+				"request_body_bytes", requestBodyBytes,
+				"response_status", spyW.statusCode,
+				"response_body_bytes", spyW.written,
 			)
 		})
 	}
+}
+
+// spyReadCloser wraps an io.ReadCloser and counts bytes read
+type spyReadCloser struct {
+	rc   io.ReadCloser
+	read int64
+}
+
+func newSpyReadCloser(rc io.ReadCloser) *spyReadCloser {
+	return &spyReadCloser{rc: rc}
+}
+
+func (s *spyReadCloser) Read(p []byte) (n int, err error) {
+	n, err = s.rc.Read(p)
+	s.read += int64(n)
+	return n, err
+}
+
+func (s *spyReadCloser) Close() error {
+	return s.rc.Close()
+}
+
+// spyResponseWriter wraps http.ResponseWriter to capture status code and bytes written
+type spyResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+	written    int64
+}
+
+func newSpyResponseWriter(w http.ResponseWriter) *spyResponseWriter {
+	return &spyResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+}
+
+func (s *spyResponseWriter) WriteHeader(statusCode int) {
+	s.statusCode = statusCode
+	s.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (s *spyResponseWriter) Write(p []byte) (n int, err error) {
+	n, err = s.ResponseWriter.Write(p)
+	s.written += int64(n)
+	return n, err
 }
 
 func (s *server) start() error {
