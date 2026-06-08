@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"boot.dev/linko/internal/store"
+	pkgerr "github.com/pkg/errors"
 )
 
 type server struct {
@@ -20,6 +21,14 @@ type server struct {
 	cancel     context.CancelFunc
 	logger     *slog.Logger
 }
+
+// LogContext holds contextual information for request logging
+type LogContext struct {
+	Username string
+	Error    error
+}
+
+const logContextKey = "log_context"
 
 func newServer(store store.Store, port int, cancel context.CancelFunc, logger *slog.Logger) *server {
 	mux := http.NewServeMux()
@@ -62,6 +71,10 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			// Wrap response writer to capture status and bytes written
 			spyW := newSpyResponseWriter(w)
 
+			// Create LogContext and store it on the request context
+			logCtx := &LogContext{}
+			r = r.WithContext(context.WithValue(r.Context(), logContextKey, logCtx))
+
 			next.ServeHTTP(spyW, r)
 
 			// Get request body bytes read
@@ -70,7 +83,8 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 				requestBodyBytes = spyBody.read
 			}
 
-			logger.Info("Served request",
+			// Build log attributes
+			logAttrs := []any{
 				"method", r.Method,
 				"path", r.URL.Path,
 				"client_ip", r.RemoteAddr,
@@ -78,7 +92,19 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 				"request_body_bytes", requestBodyBytes,
 				"response_status", spyW.statusCode,
 				"response_body_bytes", spyW.written,
-			)
+			}
+
+		// Add user attribute if username is set
+		if logCtx.Username != "" {
+			logAttrs = append(logAttrs, "user", logCtx.Username)
+		}
+
+		// Add error attribute if present
+		if logCtx.Error != nil {
+			logAttrs = append(logAttrs, "error", logCtx.Error)
+		}
+
+		logger.Info("Served request", logAttrs...)
 		})
 	}
 }
@@ -140,6 +166,15 @@ func (s *server) start() error {
 func (s *server) shutdown(ctx context.Context) error {
 	s.logger.Debug("Linko is shutting down")
 	return s.httpServer.Shutdown(ctx)
+}
+
+// httpError stashes the error (wrapped with stack trace) in LogContext and sends an HTTP error response
+func httpError(ctx context.Context, w http.ResponseWriter, statusCode int, err error) {
+	wrappedErr := pkgerr.WithStack(err)
+	if logCtx, ok := ctx.Value(logContextKey).(*LogContext); ok {
+		logCtx.Error = wrappedErr
+	}
+	http.Error(w, err.Error(), statusCode)
 }
 
 func (s *server) handlerShutdown(w http.ResponseWriter, r *http.Request) {
