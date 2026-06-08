@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -41,7 +42,7 @@ func newServer(store store.Store, port int, cancel context.CancelFunc, logger *s
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
-		Handler: requestLogger(logger)(mux),
+		Handler: requestLogger(logger)(requestIDMiddleware(mux)),
 	}
 	s.httpServer = srv
 
@@ -83,16 +84,17 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 				requestBodyBytes = spyBody.read
 			}
 
-			// Build log attributes
-			logAttrs := []any{
-				"method", r.Method,
-				"path", r.URL.Path,
-				"client_ip", r.RemoteAddr,
-				"duration", time.Since(start).String(),
-				"request_body_bytes", requestBodyBytes,
-				"response_status", spyW.statusCode,
-				"response_body_bytes", spyW.written,
-			}
+		// Build log attributes
+		logAttrs := []any{
+			"method", r.Method,
+			"path", r.URL.Path,
+			"client_ip", r.RemoteAddr,
+			"duration", time.Since(start).String(),
+			"request_body_bytes", requestBodyBytes,
+			"response_status", spyW.statusCode,
+			"response_body_bytes", spyW.written,
+			"request_id", spyW.Header().Get("X-Request-ID"),
+		}
 
 		// Add user attribute if username is set
 		if logCtx.Username != "" {
@@ -175,6 +177,19 @@ func httpError(ctx context.Context, w http.ResponseWriter, statusCode int, err e
 		logCtx.Error = wrappedErr
 	}
 	http.Error(w, err.Error(), statusCode)
+}
+
+// requestIDMiddleware reads X-Request-ID from the request or generates one,
+// and sets it on the response header before calling the next handler.
+func requestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.Header.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = rand.Text()
+		}
+		w.Header().Set("X-Request-ID", requestID)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *server) handlerShutdown(w http.ResponseWriter, r *http.Request) {
