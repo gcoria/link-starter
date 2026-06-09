@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -17,6 +16,7 @@ import (
 	"boot.dev/linko/internal/store"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
+	"gopkg.in/natefinch/lumberjack.v2"
 	pkgerr "github.com/pkg/errors"
 )
 
@@ -90,14 +90,17 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) {
 	})
 
 	if logFile != "" {
-		file, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to open log file: %w", err)
+		logger := &lumberjack.Logger{
+			Filename:   logFile,
+			MaxSize:    1,
+			MaxAge:     28,
+			MaxBackups: 10,
+			LocalTime:  false,
+			Compress:   true,
 		}
-		bufferedFile := bufio.NewWriterSize(file, 8192)
 
 		// File handler - INFO and above (JSON format)
-		fileHandler := slog.NewJSONHandler(bufferedFile, &slog.HandlerOptions{
+		fileHandler := slog.NewJSONHandler(logger, &slog.HandlerOptions{
 			Level:       slog.LevelInfo,
 			ReplaceAttr: replaceAttr,
 		})
@@ -106,13 +109,7 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) {
 		multiHandler := slog.NewMultiHandler(stderrHandler, fileHandler)
 
 		closeLogger := func() error {
-			if err := bufferedFile.Flush(); err != nil {
-				return fmt.Errorf("failed to flush log file: %w", err)
-			}
-			if err := file.Close(); err != nil {
-				return fmt.Errorf("failed to close log file: %w", err)
-			}
-			return nil
+			return logger.Close()
 		}
 		return slog.New(multiHandler), closeLogger, nil
 	}
