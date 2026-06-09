@@ -16,8 +16,8 @@ import (
 	"boot.dev/linko/internal/store"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
-	"gopkg.in/natefinch/lumberjack.v2"
 	pkgerr "github.com/pkg/errors"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 type closeFunc func() error
