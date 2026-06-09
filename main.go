@@ -15,6 +15,8 @@ import (
 	"boot.dev/linko/internal/build"
 	"boot.dev/linko/internal/linkoerr"
 	"boot.dev/linko/internal/store"
+	"github.com/lmittmann/tint"
+	"github.com/mattn/go-isatty"
 	pkgerr "github.com/pkg/errors"
 )
 
@@ -79,10 +81,12 @@ func replaceAttr(groups []string, a slog.Attr) slog.Attr {
 }
 
 func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) {
-	// STDERR handler - DEBUG and above
-	stderrHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	// STDERR handler - DEBUG and above with color support
+	noColor := !isatty.IsTerminal(os.Stderr.Fd()) && !isatty.IsCygwinTerminal(os.Stderr.Fd())
+	stderrHandler := tint.NewHandler(os.Stderr, &tint.Options{
 		Level:       slog.LevelDebug,
 		ReplaceAttr: replaceAttr,
+		NoColor:     noColor,
 	})
 
 	if logFile != "" {
