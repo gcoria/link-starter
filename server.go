@@ -176,7 +176,12 @@ func httpError(ctx context.Context, w http.ResponseWriter, statusCode int, err e
 	if logCtx, ok := ctx.Value(logContextKey).(*LogContext); ok {
 		logCtx.Error = wrappedErr
 	}
-	http.Error(w, err.Error(), statusCode)
+
+	responseBody := err.Error()
+	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden || statusCode == http.StatusInternalServerError {
+		responseBody = http.StatusText(statusCode)
+	}
+	http.Error(w, responseBody, statusCode)
 }
 
 // requestIDMiddleware reads X-Request-ID from the request or generates one,

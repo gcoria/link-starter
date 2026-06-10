@@ -37,7 +37,7 @@ func (s *server) handlerLogin(w http.ResponseWriter, r *http.Request) {
 func (s *server) handlerShortenLink(w http.ResponseWriter, r *http.Request) {
 	user, ok := r.Context().Value(UserContextKey).(string)
 	if !ok || user == "" {
-		httpError(r.Context(), w, http.StatusUnauthorized, errors.New("unauthorized"))
+		httpError(r.Context(), w, http.StatusUnauthorized, errors.New("invalid URL"))
 		return
 	}
 	longURL := r.FormValue("url")
@@ -47,7 +47,7 @@ func (s *server) handlerShortenLink(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := url.Parse(longURL)
 	if err != nil || u.Scheme == "" || u.Host == "" {
-		httpError(r.Context(), w, http.StatusBadRequest, errors.New("invalid url: must include scheme (http/https) and host"))
+		httpError(r.Context(), w, http.StatusBadRequest, errors.New("invalid URL"))
 		return
 	}
 	if err := checkDestination(longURL); err != nil {
