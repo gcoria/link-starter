@@ -58,7 +58,7 @@ func newServer(store store.Store, port int, cancel context.CancelFunc, logger *s
 }
 
 func redactIP(addr string) string {
-	host, _, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr
 	}
@@ -74,7 +74,9 @@ func redactIP(addr string) string {
 	}
 
 	redactedHost := fmt.Sprintf("%d.%d.%d.x", ipv4[0], ipv4[1], ipv4[2])
-
+	if port != "" {
+		return net.JoinHostPort(redactedHost, port)
+	}
 	return redactedHost
 }
 

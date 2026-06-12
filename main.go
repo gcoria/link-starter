@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -32,6 +34,8 @@ type multiError interface {
 	Unwrap() []error
 }
 
+var sensitiveKeys = []string{"password", "key", "apikey", "secret", "pin", "creditcardno", "user"}
+
 // errorAttrs builds a slice of slog.Attr for a single error containing:
 // - message attribute with the error's message
 // - any linkoerr attributes extracted from the error
@@ -54,7 +58,27 @@ func errorAttrs(err error) []slog.Attr {
 	return attrs
 }
 
+func redactURLPassword(s string) string {
+	u, err := url.Parse(s)
+	if err != nil || u.User == nil {
+		return s
+	}
+	if _, ok := u.User.Password(); !ok {
+		return s
+	}
+	u.User = url.UserPassword(u.User.Username(), "[REDACTED]")
+	return u.String()
+}
+
 func replaceAttr(groups []string, a slog.Attr) slog.Attr {
+	if slices.Contains(sensitiveKeys, a.Key) {
+		return slog.String(a.Key, "[REDACTED]")
+	}
+	if a.Value.Kind() == slog.KindString {
+		if redacted := redactURLPassword(a.Value.String()); redacted != a.Value.String() {
+			return slog.String(a.Key, redacted)
+		}
+	}
 	if a.Key == "error" {
 		err, ok := a.Value.Any().(error)
 		if !ok {
