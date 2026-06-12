@@ -57,6 +57,27 @@ func newServer(store store.Store, port int, cancel context.CancelFunc, logger *s
 	return s
 }
 
+func redactIP(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return addr
+	}
+
+	ipv4 := ip.To4()
+	if ipv4 == nil {
+		return addr
+	}
+
+	redactedHost := fmt.Sprintf("%d.%d.%d.x", ipv4[0], ipv4[1], ipv4[2])
+
+	return redactedHost
+}
+
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -84,29 +105,29 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 				requestBodyBytes = spyBody.read
 			}
 
-		// Build log attributes
-		logAttrs := []any{
-			"method", r.Method,
-			"path", r.URL.Path,
-			"client_ip", r.RemoteAddr,
-			"duration", time.Since(start).String(),
-			"request_body_bytes", requestBodyBytes,
-			"response_status", spyW.statusCode,
-			"response_body_bytes", spyW.written,
-			"request_id", spyW.Header().Get("X-Request-ID"),
-		}
+			// Build log attributes
+			logAttrs := []any{
+				"method", r.Method,
+				"path", r.URL.Path,
+				"client_ip", redactIP(r.RemoteAddr),
+				"duration", time.Since(start).String(),
+				"request_body_bytes", requestBodyBytes,
+				"response_status", spyW.statusCode,
+				"response_body_bytes", spyW.written,
+				"request_id", spyW.Header().Get("X-Request-ID"),
+			}
 
-		// Add user attribute if username is set
-		if logCtx.Username != "" {
-			logAttrs = append(logAttrs, "user", logCtx.Username)
-		}
+			// Add user attribute if username is set
+			if logCtx.Username != "" {
+				logAttrs = append(logAttrs, "user", logCtx.Username)
+			}
 
-		// Add error attribute if present
-		if logCtx.Error != nil {
-			logAttrs = append(logAttrs, "error", logCtx.Error)
-		}
+			// Add error attribute if present
+			if logCtx.Error != nil {
+				logAttrs = append(logAttrs, "error", logCtx.Error)
+			}
 
-		logger.Info("Served request", logAttrs...)
+			logger.Info("Served request", logAttrs...)
 		})
 	}
 }
